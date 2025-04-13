@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>대한민국의 전국구 계산기</title>
+    <style>
+        body {
+            font-family: 'Noto Sans KR', sans-serif;
+            margin: 2rem;
+            background-color: #f7f9fc;
+            color: #333;
+        }
+        h1 {
+            color: #2b4f81;
+        }
+        label, input, select, button {
+            margin: 0.5rem 0;
+            padding: 0.5rem;
+            font-size: 1rem;
+        }
+        input[type="number"] {
+            width: 100px;
+        }
+        #partyInputs div {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+        table {
+            border-collapse: collapse;
+            margin-top: 1rem;
+            width: 100%;
+            background: white;
+        }
+        th, td {
+            border: 1px solid #ccc;
+            padding: 0.5rem;
+            text-align: center;
+        }
+        th {
+            background-color: #e6effa;
+        }
+        button {
+            background-color: #2b4f81;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #1f3a63;
+        }
+    </style>
+</head>
+<body>
+<h1>대한민국의 전국구 계산기</h1>
+<label>총선 유형:
+    <select id="system" onchange="handleSystemChange()">
+        <option value="6">6~8대 총선</option>
+        <option value="11">11~12대 총선</option>
+        <option value="13">13대 총선</option>
+        <option value="14">14대 총선</option>
+        <option value="15">15~16대 총선</option>
+    </select>
+</label><br>
+<label>지역구 의석 수: <input type="number" id="districtSeats"></label><br>
+<label>전국구 의석 수: <input type="number" id="proportionalSeats"></label><br>
+<div id="partyInputs"></div>
+<button onclick="addParty()">[ + ] 정당 추가</button>
+<button onclick="calculate()">계산하기</button>
+<h2>배분 결과</h2>
+<table id="resultTable" style="display:none;">
+    <thead>
+        <tr>
+            <th>정당 이름</th>
+            <th>득표율 (%)</th>
+            <th>지역구 의석</th>
+            <th>전국구 의석</th>
+            <th>총 의석</th>
+        </tr>
+    </thead>
+    <tbody></tbody>
+</table>
+<script>
+    let parties = [];
+
+    function handleSystemChange() {
+        const system = parseInt(document.getElementById("system").value);
+        const partyInputs = document.getElementById("partyInputs");
+
+        // 무소속 처리
+        if (system >= 11 && system <= 16) {
+            if (!parties.find(p => p.name === "무소속")) {
+                const idx = parties.length;
+                parties.push({ name: "무소속", voteRate: 0, districtWon: 0, fixed: true });
+                const row = document.createElement("div");
+                row.id = "party-row-" + idx;
+                row.innerHTML = `
+                    <input value="무소속" disabled>
+                    <input type="number" placeholder="득표율" onchange="updateParty(${idx}, 'voteRate', this.value)">
+                    <input type="number" placeholder="지역구 의석" onchange="updateParty(${idx}, 'districtWon', this.value)">
+                `;
+                partyInputs.appendChild(row);
+            }
+        } else {
+            const index = parties.findIndex(p => p.name === "무소속");
+            if (index > -1) {
+                parties.splice(index, 1);
+                const row = document.getElementById("party-row-" + index);
+                if (row) row.remove();
+            }
+        }
+    }
+
+    function addParty() {
+        const idx = parties.length;
+        parties.push({ name: "", voteRate: 0, districtWon: 0 });
+        const row = document.createElement("div");
+        row.id = "party-row-" + idx;
+        row.innerHTML = `
+            <input placeholder="정당 이름" onchange="updateParty(${idx}, 'name', this.value)">
+            <input type="number" placeholder="득표율" onchange="updateParty(${idx}, 'voteRate', this.value)">
+            <input type="number" placeholder="지역구 의석" onchange="updateParty(${idx}, 'districtWon', this.value)">
+            <button onclick="removeParty(${idx})">[ - ]</button>
+        `;
+        document.getElementById("partyInputs").appendChild(row);
+    }
+
+    function removeParty(index) {
+        if (parties[index].fixed) return;
+        parties[index] = null;
+        const row = document.getElementById("party-row-" + index);
+        if (row) row.remove();
+    }
+
+    function updateParty(index, field, value) {
+        if (parties[index]) {
+            parties[index][field] = field === 'name' ? value : parseFloat(value);
+        }
+    }
+
+    function calculate() {
+        const system = parseInt(document.getElementById("system").value);
+        const propTotal = parseInt(document.getElementById("proportionalSeats").value);
+        const validParties = parties.filter(p => p !== null);
+
+        // 조건별로 전국구 배정 대상 정당 필터
+        const eligible = validParties.filter(p => {
+            if (p.name === "무소속") return false;
+            if (system <= 8) return p.districtWon >= 3;
+            if (system <= 14) return p.districtWon >= 5;
+            return p.districtWon >= 5 || p.voteRate >= 3;
+        });
+
+        const totalVotes = eligible.reduce((sum, p) => sum + p.voteRate, 0);
+
+        const results = validParties.map(p => {
+            const isIndependent = p.name === "무소속";
+            const propSeats = eligible.includes(p) ? Math.round(propTotal * (p.voteRate / totalVotes)) : 0;
+            return {
+                name: p.name,
+                voteRate: p.voteRate,
+                districtWon: p.districtWon,
+                proportional: isIndependent ? 0 : propSeats,
+                total: p.districtWon + (isIndependent ? 0 : propSeats)
+            };
+        });
+
+        const tbody = document.querySelector("#resultTable tbody");
+        tbody.innerHTML = "";
+        results.forEach(r => {
+            const row = document.createElement("tr");
+            row.innerHTML = `
+                <td>${r.name}</td>
+                <td>${r.voteRate.toFixed(1)}</td>
+                <td>${r.districtWon}</td>
+                <td>${r.proportional}</td>
+                <td>${r.total}</td>
+            `;
+            tbody.appendChild(row);
+        });
+        document.getElementById("resultTable").style.display = "table";
+    }
+
+    handleSystemChange();
+</script>
+</body>
+</html>
